@@ -28,9 +28,9 @@ Link or mention the existing code paths, docs, or examples that will help a cont
 
 ## Acceptance criteria
 
-- [ ] 
-- [ ] 
-- [ ] 
+- [ ]
+- [ ]
+- [ ]
 
 ## Test plan
 
