@@ -268,13 +268,18 @@ export default function ToolConfig() {
 
       {plugin.availability.missing_binaries.length > 0 && (
         <section className="bg-charcoal border-4 border-rag-amber p-6 shadow-[6px_6px_0px_0px_rgba(0,0,0,1)]">
-          <p className="text-[10px] uppercase font-black tracking-[0.3em] text-rag-amber">Dependency warning</p>
-          <p className="text-[10px] text-silver/70 uppercase tracking-widest mt-2">
-            Missing local binaries: {plugin.availability.missing_binaries.join(', ')}. Task launch is still allowed but may fail at runtime.
+          <p className="text-[10px] uppercase font-black tracking-[0.3em] text-rag-amber">
+            Plugin unavailable
+          </p>
+          <p className="text-[10px] text-silver/70 uppercase tracking-widest mt-2 leading-relaxed">
+            {plugin.availability.guidance ||
+              `Unavailable: Requires external binaries (${plugin.availability.missing_binaries.join(', ')}). Install required tools locally to enable this scanner.`}
+          </p>
+          <p className="text-[9px] text-silver/40 uppercase tracking-widest mt-3">
+            Task launch remains available, but execution may fail until dependencies are installed.
           </p>
         </section>
-      )}
-
+     )}
       <main className="grid grid-cols-1 xl:grid-cols-4 gap-12 pt-4">
         <div className="xl:col-span-3 space-y-10">
           {presetNames.length > 0 && (
@@ -321,7 +326,10 @@ export default function ToolConfig() {
                         value={String(value ?? '')}
                         onChange={(event) => handleFieldChange(field, event.target.value)}
                         placeholder={field.placeholder || ''}
-                        className="w-full min-h-[120px] bg-charcoal-dark border-4 border-black p-4 text-sm text-silver-bright focus:outline-none focus:border-rag-blue"
+                        aria-invalid={!!validationError}
+                        className={`w-full min-h-[120px] bg-charcoal-dark border-4 p-4 text-sm text-silver-bright focus:outline-none transition-all ${
+                          validationError ? 'border-rag-red' : 'border-black focus:border-rag-blue'
+                        }`}
                       />
                     ) : field.type === 'integer' ? (
                       <input
@@ -329,7 +337,10 @@ export default function ToolConfig() {
                         value={value === '' ? '' : String(value ?? '')}
                         onChange={(event) => handleFieldChange(field, coerceInteger(event.target.value))}
                         placeholder={field.placeholder || ''}
-                        className="w-full bg-charcoal-dark border-4 border-black p-4 text-sm text-silver-bright focus:outline-none focus:border-rag-blue"
+                        aria-invalid={!!validationError}
+                        className={`w-full bg-charcoal-dark border-4 p-4 text-sm text-silver-bright focus:outline-none transition-all ${
+                          validationError ? 'border-rag-red' : 'border-black focus:border-rag-blue'
+                        }`}
                       />
                     ) : field.type === 'boolean' ? (
                       <button
@@ -345,7 +356,10 @@ export default function ToolConfig() {
                       <select
                         value={String(value ?? '')}
                         onChange={(event) => handleFieldChange(field, event.target.value)}
-                        className="w-full bg-charcoal-dark border-4 border-black p-4 text-sm text-silver-bright focus:outline-none focus:border-rag-blue"
+                        aria-invalid={!!validationError}
+                        className={`w-full bg-charcoal-dark border-4 p-4 text-sm text-silver-bright focus:outline-none transition-all ${
+                          validationError ? 'border-rag-red' : 'border-black focus:border-rag-blue'
+                        }`}
                       >
                         <option value="">Select option</option>
                         {(field.options || []).map((option) => (
@@ -383,7 +397,10 @@ export default function ToolConfig() {
                         value={String(value ?? '')}
                         onChange={(event) => handleFieldChange(field, event.target.value)}
                         placeholder={field.placeholder || ''}
-                        className="w-full bg-charcoal-dark border-4 border-black p-4 text-sm text-silver-bright focus:outline-none focus:border-rag-blue"
+                        aria-invalid={!!validationError}
+                        className={`w-full bg-charcoal-dark border-4 p-4 text-sm text-silver-bright focus:outline-none transition-all ${
+                          validationError ? 'border-rag-red' : 'border-black focus:border-rag-blue'
+                        }`}
                       />
                     )}
 
@@ -395,34 +412,33 @@ export default function ToolConfig() {
             </div>
           </section>
 
-          {plugin.requires_consent && (
-            <section className="bg-charcoal border-4 border-black p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-              <h3 className="text-xs font-black text-silver-bright uppercase tracking-[0.4em] italic mb-6">Consent_Gate</h3>
-              <p className="text-[10px] text-silver/60 uppercase tracking-widest mb-4">
-                {plugin.consent_message || 'This plugin requires explicit authorization before execution.'}
-              </p>
-              <label className="flex items-center gap-3 text-[10px] uppercase tracking-widest font-black">
-                <input
-                  type="checkbox"
-                  checked={consentGranted}
-                  onChange={(event) => setConsentGranted(event.target.checked)}
-                  className="w-4 h-4"
-                />
-                I have explicit authorization for this target
-              </label>
-            </section>
-          )}
         </div>
 
         <aside className="xl:col-span-1">
           <section className="bg-charcoal-dark border-4 border-black p-8 shadow-[8px_8px_0px_0px_rgba(0,0,0,1)] space-y-6">
             <h3 className="text-[11px] font-black text-silver-bright uppercase tracking-[0.4em] italic">Deploy_Control</h3>
+            {plugin.requires_consent && (
+              <div className="space-y-4 border-4 border-black bg-charcoal p-5">
+                <p className="text-[10px] text-silver/60 uppercase tracking-widest leading-6">
+                  {plugin.consent_message || 'This plugin requires explicit authorization before execution.'}
+                </p>
+                <label className="flex items-start gap-3 text-[10px] uppercase tracking-widest font-black text-silver-bright">
+                  <input
+                    type="checkbox"
+                    checked={consentGranted}
+                    onChange={(event) => setConsentGranted(event.target.checked)}
+                    className="mt-0.5 w-4 h-4 shrink-0"
+                  />
+                  <span>I have explicit authorization for this target</span>
+                </label>
+              </div>
+            )}
             <button
               onClick={handleStartScan}
-              disabled={submitting}
+              disabled={submitting || invalidFieldCount > 0}
               className="w-full py-4 bg-rag-red border-4 border-black text-black text-[10px] font-black uppercase tracking-[0.3em] hover:shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] hover:-translate-y-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {submitting ? 'QUEUEING...' : 'INITIATE_SCAN'}
+              {submitting ? 'QUEUEING...' : invalidFieldCount > 0 ? 'FIX_PARAMETERS' : 'INITIATE_SCAN'}
             </button>
             <p className="text-[10px] text-silver/30 uppercase tracking-widest">
               Parameter issues: {invalidFieldCount}
