@@ -113,3 +113,22 @@ import {
       });
     });
   });
+
+  describe("Issue #107: Invalid Date Handling", () => {
+  test("returns N/A for completely random strings", () => {
+    // This should fail initially because the current function 
+    // might return 'Invalid Date' or crash instead of 'N/A'
+    expect(formatLocaleDate("not-a-date")).toBe("N/A");
+  });
+
+  test("returns N/A for impossible calendar dates", () => {
+    // This catches dates that JavaScript usually 'overflows' 
+    // like turning month 13 into next year
+    expect(formatLocaleDate("2026-13-45")).toBe("N/A");
+  });
+  
+  test("returns N/A for numeric strings that aren't timestamps", () => {
+    // Prevents random 5-digit strings from being parsed as years
+    expect(formatLocaleDate("99999")).toBe("N/A");
+  });
+});

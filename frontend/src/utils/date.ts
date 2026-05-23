@@ -20,8 +20,16 @@ export function parseDateSafe(rawValue: string | null | undefined): Date | null 
       : [`${isoCompatible}Z`, isoCompatible, raw]
 
     for (const candidate of candidates) {
-      const d = new Date(candidate)
-      if (!Number.isNaN(d.getTime())) return d
+    const d = new Date(candidate)
+  
+    // 1. Check if the date is technically valid
+    const isValid = !Number.isNaN(d.getTime())
+  
+   // 2. Sanity check: Ensure the year is between 1900 and 2100
+   // This is what will catch the "99999" error from your screenshot
+    const isRealistic = isValid && d.getFullYear() > 1900 && d.getFullYear() < 2100
+
+    if (isRealistic) return d
     }
   } catch (error) {
     console.error('Date parsing failed:', error, raw)
