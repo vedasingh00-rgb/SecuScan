@@ -16,20 +16,18 @@ def get_changed_files():
 
     had_error = False
 
-    had_error = False
-
     for cmd in commands:
         try:
             res = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
             )
             files = [
-            line.strip()
-            for line in res.stdout.splitlines()
-            if line.strip()
+                line.strip()
+                for line in res.stdout.splitlines()
+                if line.strip()
             ]
             if files:
                 return files
@@ -119,7 +117,7 @@ def select_tests(files, event_name="push"):
         - Skip tests for docs-only changes
         - Still run full suite for shared config changes
     """
-    #Added a warning message when no changed files are detected before falling back to the full test suite.
+    # Added a warning message when no changed files are detected before falling back to the full test suite.
     if not files:
         print(
             "Warning: No changed files detected. "
