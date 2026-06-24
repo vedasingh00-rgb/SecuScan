@@ -20,12 +20,18 @@ from .routes_json_helpers import (
     deserialize_finding_rows,
     parse_json_fields,
 )
+from .routes_report_helpers import (
+    _slugify_filename_part,
+    build_report_filename,
+)
 
 __all__ = [
     "FINDING_JSON_FIELDS",
     "parse_json_fields",
     "deserialize_finding_rows",
     "deserialize_asset_service_rows",
+    "_slugify_filename_part",
+    "build_report_filename",
 ]
 
 def _parse_workflow_steps(raw_steps: Any) -> List[Dict[str, Any]]:
@@ -74,24 +80,6 @@ def _json_payload(value: Any, fallback: str) -> str:
 
 from .validation import is_filesystem_target  # noqa: E402
 
-def _slugify_filename_part(value: str, fallback: str) -> str:
-    cleaned = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
-    return cleaned or fallback
-
-def build_report_filename(task: Dict[str, Any], extension: str) -> str:
-    tool = _slugify_filename_part(str(task.get("tool_name") or task.get("plugin_id") or "scan"), "scan")
-
-    raw_target = str(task.get("target") or "")
-    parsed = urlparse(raw_target if "://" in raw_target else f"//{raw_target}")
-    target_source = parsed.netloc or parsed.path or raw_target
-    target = _slugify_filename_part(target_source, "target")
-
-    created_at = str(task.get("created_at") or "")
-    date_match = re.search(r"\d{4}-\d{2}-\d{2}", created_at)
-    date_part = date_match.group(0) if date_match else "report"
-
-    return f"secuscan_{tool}_{target}_{date_part}.{extension}"
-
 logger = logging.getLogger(__name__)
 
 from .cache import get_cache, invalidate_view_cache
@@ -119,7 +107,7 @@ from .ratelimit import (
 from .validation import validate_target, validate_task_start_payload, validate_url
 from .reporting import reporting
 from .vault import VaultCrypto
-from .workflows import scheduler
+from .workflows import scheduler, _finalize_workflow_run
 from .auth import require_api_key, get_current_owner
 from .execution_context import is_offensive_validation, normalize_execution_context
 from .finding_intelligence import build_asset_summary, build_finding_groups
@@ -481,6 +469,69 @@ async def start_task(
         "status": "queued",
         "created_at": "now",
         "stream_url": f"/api/v1/task/{task_id}/stream"
+    }
+
+@router.post("/task/{task_id}/retry", dependencies=[Depends(task_start_limiter)])
+async def retry_task(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    raw_request: Request,
+    owner: str = Depends(get_current_owner),
+):
+    """
+    Retry a failed or cancelled scan task.
+    """
+    db = await get_db()
+    task = await require_owned_task(db, task_id, owner, columns="id, owner_id, status, plugin_id")
+
+    if task["status"] in ["queued", "running"]:
+        raise HTTPException(status_code=409, detail="Task is already queued or running")
+    elif task["status"] not in ["failed", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Only failed or cancelled tasks can be retried")
+
+    # Check plugin rate limits
+    plugin_manager = await get_plugin_manager_for_request()
+    plugin = plugin_manager.get_plugin(task["plugin_id"])
+    if not plugin:
+        raise HTTPException(status_code=404, detail=f"Plugin not found: {task['plugin_id']}")
+
+    client_id = resolve_client_identity(raw_request)
+    can_execute, error_msg = await rate_limiter.can_execute(
+        task["plugin_id"],
+        plugin.safety.get("rate_limit", {}).get("max_per_hour", settings.max_tasks_per_hour),
+        client_id=client_id,
+    )
+
+    if not can_execute:
+        raise HTTPException(status_code=429, detail=error_msg)
+
+    # Atomic update to prevent duplicate reruns if called rapidly
+    cursor = await db.execute(
+        "UPDATE tasks SET status = 'queued', error_message = NULL, exit_code = NULL, "
+        "started_at = NULL, completed_at = NULL "
+        "WHERE id = ? AND status IN ('failed', 'cancelled')",
+        (task_id,)
+    )
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=409, detail="Task is already queued or running")
+
+    # Cleanup previous findings and reports for a fresh retry
+    await db.execute("DELETE FROM findings WHERE task_id = ?", (task_id,))
+    await db.execute("DELETE FROM reports WHERE task_id = ?", (task_id,))
+
+    # Re-acquire concurrency slot
+    can_acquire, error_msg = await concurrent_limiter.acquire(task_id)
+    if not can_acquire:
+        await executor.mark_task_failed(task_id, reason="Concurrency limit reached; task was not retried")
+        raise HTTPException(status_code=503, detail=error_msg)
+
+    background_tasks.add_task(executor.execute_task, task_id)
+    await invalidate_view_cache()
+
+    return {
+        "task_id": task_id,
+        "status": "queued",
+        "message": "Task retry initiated"
     }
 
 @router.get("/task/{task_id}/status")
@@ -1393,16 +1444,28 @@ async def get_settings():
 
 
 @router.get("/vault", dependencies=[Depends(vault_limiter)])
-async def list_vault_secrets():
+async def list_vault_secrets(
+    owner: str = Depends(get_current_owner),
+):
     db = await get_db()
     rows = await db.fetchall(
-        "SELECT id, name, created_at, updated_at FROM credential_vault ORDER BY name ASC"
+        """
+        SELECT id, name, created_at, updated_at
+        FROM credential_vault
+        WHERE owner_id = ?
+        ORDER BY name ASC
+        """,
+        (owner,),
     )
     return {"items": rows, "total": len(rows)}
 
 
 @router.put("/vault/{name}", dependencies=[Depends(vault_limiter)])
-async def upsert_vault_secret(name: str, payload: Dict[str, str]):
+async def upsert_vault_secret(
+    name: str,
+    payload: Dict[str, str],
+    owner: str = Depends(get_current_owner),
+):
     value = str(payload.get("value", ""))
     if not value:
         raise HTTPException(status_code=400, detail="Secret value is required")
@@ -1412,36 +1475,81 @@ async def upsert_vault_secret(name: str, payload: Dict[str, str]):
     encrypted = crypto.encrypt(value)
     secret_id = str(uuid.uuid4())
 
-    existing = await db.fetchone("SELECT id FROM credential_vault WHERE name = ?", (name,))
+    existing = await db.fetchone(
+        """
+        SELECT id
+        FROM credential_vault
+        WHERE owner_id = ? AND name = ?
+        """,
+        (owner, name),
+    )
+
     if existing:
         await db.execute(
-            "UPDATE credential_vault SET encrypted_value = ?, updated_at = datetime('now') WHERE name = ?",
-            (encrypted, name),
+            """
+            UPDATE credential_vault
+            SET encrypted_value = ?, updated_at = datetime('now')
+            WHERE owner_id = ? AND name = ?
+            """,
+            (encrypted, owner, name),
         )
     else:
         await db.execute(
-            "INSERT INTO credential_vault (id, name, encrypted_value) VALUES (?, ?, ?)",
-            (secret_id, name, encrypted),
+            """
+            INSERT INTO credential_vault
+            (id, owner_id, name, encrypted_value)
+            VALUES (?, ?, ?, ?)
+            """,
+            (secret_id, owner, name, encrypted),
         )
+
     return {"name": name, "stored": True}
 
-
 @router.get("/vault/{name}", dependencies=[Depends(vault_limiter)])
-async def get_vault_secret(name: str):
+async def get_vault_secret(
+    name: str,
+    owner: str = Depends(get_current_owner),
+):
     db = await get_db()
-    row = await db.fetchone("SELECT encrypted_value FROM credential_vault WHERE name = ?", (name,))
+
+    row = await db.fetchone(
+        """
+        SELECT encrypted_value
+        FROM credential_vault
+        WHERE owner_id = ? AND name = ?
+        """,
+        (owner, name),
+    )
+
     if not row:
         raise HTTPException(status_code=404, detail="Secret not found")
-    crypto = VaultCrypto(settings.resolved_vault_key)
-    return {"name": name, "value": crypto.decrypt(row["encrypted_value"])}
 
+    crypto = VaultCrypto(settings.resolved_vault_key)
+
+    return {
+        "name": name,
+        "value": crypto.decrypt(row["encrypted_value"]),
+    }
 
 @router.delete("/vault/{name}", dependencies=[Depends(vault_limiter)])
-async def delete_vault_secret(name: str):
+async def delete_vault_secret(
+    name: str,
+    owner: str = Depends(get_current_owner),
+):
     db = await get_db()
-    await db.execute("DELETE FROM credential_vault WHERE name = ?", (name,))
-    return {"name": name, "deleted": True}
 
+    await db.execute(
+        """
+        DELETE FROM credential_vault
+        WHERE owner_id = ? AND name = ?
+        """,
+        (owner, name),
+    )
+
+    return {
+        "name": name,
+        "deleted": True,
+    }
 
 @router.get("/target-policies")
 async def list_target_policies(owner: str = Depends(get_current_owner)):
@@ -1751,8 +1859,17 @@ async def run_workflow_once(workflow_id: str, owner: str = Depends(get_current_o
         "WHERE workflow_id = ? ORDER BY version_number DESC LIMIT 1",
         (workflow_id,),
     )
-    version_id = active_version["id"] if active_version else None
-    version_number = active_version["version_number"] if active_version else None
+    if not active_version:
+        active_version = await db.snapshot_workflow_version(
+            workflow_id=workflow_id,
+            name=row["name"],
+            schedule_seconds=row["schedule_seconds"],
+            enabled=bool(row["enabled"]),
+            steps=steps,
+            created_by="system",
+        )
+    version_id = active_version["id"]
+    version_number = active_version["version_number"]
     created_task_ids: List[str] = []
     for step in steps:
         execution_context = normalize_execution_context(step.get("execution_context") or {})
@@ -1792,34 +1909,6 @@ async def run_workflow_once(workflow_id: str, owner: str = Depends(get_current_o
         "queued_tasks": created_task_ids,
     }
 
-
-async def _finalize_workflow_run(run_id: str, poll_interval: float = 5.0, max_polls: int = 720) -> None:
-    """Background task that polls task statuses and marks the run terminal.
-
-    Polls every *poll_interval* seconds for up to *max_polls* iterations
-    (default: 5 s × 720 = 1 hour). If tasks are still running after the
-    limit, the run is marked failed with a timeout message so it never stays
-    permanently in the 'queued' state.
-    """
-    from .database import get_db as _get_db
-    for _ in range(max_polls):
-        await asyncio.sleep(poll_interval)
-        try:
-            db = await _get_db()
-            terminal_status = await db.check_workflow_run_tasks(run_id)
-            if terminal_status is not None:
-                await db.finalize_workflow_run(run_id, terminal_status)
-                return
-        except Exception as exc:
-            logger.warning("workflow run finalization error for %s: %s", run_id, exc)
-            return
-    try:
-        db = await _get_db()
-        await db.finalize_workflow_run(
-            run_id, "failed", "Run finalization timed out — check individual task statuses"
-        )
-    except Exception as exc:
-        logger.warning("workflow run timeout finalization failed for %s: %s", run_id, exc)
 
 
 @router.get("/workflows/{workflow_id}/runs")
