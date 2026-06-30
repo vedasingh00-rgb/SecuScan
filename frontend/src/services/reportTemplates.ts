@@ -26,9 +26,14 @@ export interface ReportTemplate {
   preview: (data: TemplateData) => string
 }
 
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;')
+}
+
 function severityBadge(s: string): string {
   const colors: Record<string, string> = { critical: '#dc2626', high: '#ea580c', medium: '#ca8a04', low: '#16a34a' }
-  return `<span style="background:${colors[s]||'#666'};color:#000;padding:1px 6px;font-size:9px;font-weight:900;letter-spacing:0.15em;text-transform:uppercase">${s}</span>`
+  const escaped = escapeHtml(s)
+  return `<span style="background:${colors[s]||'#666'};color:#000;padding:1px 6px;font-size:9px;font-weight:900;letter-spacing:0.15em;text-transform:uppercase">${escaped}</span>`
 }
 
 const executiveTemplate: ReportTemplate = {
@@ -70,7 +75,7 @@ ${data.complianceScore !== undefined ? `## Compliance Score\n\n**${data.complian
     const pct = data.totalFindings > 0 ? Math.round((data.criticalCount + data.highCount) / data.totalFindings * 100) : 0
     return `<div style="font-family:monospace;background:#1a1a1a;color:#e0e0e0;padding:16px;border:2px solid #333">
       <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.2em;color:#888;margin-bottom:12px">Executive Preview</div>
-      <div style="font-size:13px;font-weight:900;margin-bottom:8px">${data.reportName}</div>
+      <div style="font-size:13px;font-weight:900;margin-bottom:8px">${escapeHtml(data.reportName)}</div>
       <div style="display:flex;gap:12px;margin-bottom:12px">
         <span style="background:#222;padding:4px 8px;font-size:9px">Critical ${data.criticalCount}</span>
         <span style="background:#222;padding:4px 8px;font-size:9px">High ${data.highCount}</span>
@@ -121,11 +126,14 @@ ${data.assetBreakdown.map(a => `| ${a.label} | ${a.count} |`).join('\n')}
 `
   },
   preview(data: TemplateData): string {
+    const previewFindings = data.topFindings.slice(0, 3).map(f =>
+      `▸ [${severityBadge(f.severity)}] ${escapeHtml(f.title)}`
+    ).join('<br>')
     return `<div style="font-family:monospace;background:#1a1a1a;color:#e0e0e0;padding:16px;border:2px solid #333">
       <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.2em;color:#888;margin-bottom:12px">Technical Preview</div>
-      <div style="font-size:13px;font-weight:900;margin-bottom:8px">${data.reportName}</div>
+      <div style="font-size:13px;font-weight:900;margin-bottom:8px">${escapeHtml(data.reportName)}</div>
       <div style="font-size:9px;color:#aaa;margin-bottom:8px">${data.totalFindings} findings across ${data.totalAssets} assets</div>
-      <div style="font-size:9px;font-family:monospace;color:#666">${data.topFindings.slice(0, 3).map(f => `▸ [${f.severity}] ${f.title}`).join('<br>')}</div>
+      <div style="font-size:9px;font-family:monospace;color:#666">${previewFindings}</div>
     </div>`
   },
 }
@@ -176,7 +184,7 @@ ${data.summaryText}
     const color = score >= 80 ? '#16a34a' : score >= 50 ? '#ca8a04' : '#dc2626'
     return `<div style="font-family:monospace;background:#1a1a1a;color:#e0e0e0;padding:16px;border:2px solid #333">
       <div style="font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:0.2em;color:#888;margin-bottom:12px">Compliance Preview</div>
-      <div style="font-size:13px;font-weight:900;margin-bottom:8px">${data.reportName}</div>
+      <div style="font-size:13px;font-weight:900;margin-bottom:8px">${escapeHtml(data.reportName)}</div>
       <div style="font-size:24px;font-weight:900;color:${color};margin-bottom:8px">${score}/100</div>
       <div style="font-size:9px;color:#888;text-transform:uppercase;letter-spacing:0.1em">${data.criticalCount + data.highCount} control gaps identified</div>
     </div>`

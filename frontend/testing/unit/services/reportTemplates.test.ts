@@ -204,6 +204,41 @@ describe('renderPreview', () => {
     expect(html).toContain('Compliance Preview')
     expect(html).toContain('92')
   })
+
+  it('escapes HTML in reportName to prevent XSS', () => {
+    const tpl = getTemplateById('executive-summary')!
+    const data = makeSampleData({ reportName: '<img src=x onerror=alert(1)>' })
+    const html = renderPreview(tpl, data)
+
+    expect(html).not.toContain('<img')
+    expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+  })
+
+  it('escapes HTML in finding title to prevent XSS', () => {
+    const tpl = getTemplateById('technical-deep-dive')!
+    const data = makeSampleData({
+      reportType: 'technical',
+      reportName: 'safe',
+      topFindings: [{ title: '<script>alert(1)</script>', severity: 'high', target: 'example.com' }],
+    })
+    const html = renderPreview(tpl, data)
+
+    expect(html).not.toContain('<script>')
+    expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
+  })
+
+  it('escapes quotes in severity badge to prevent attribute injection', () => {
+    const tpl = getTemplateById('technical-deep-dive')!
+    const data = makeSampleData({
+      reportType: 'technical',
+      reportName: 'safe',
+      topFindings: [{ title: 'test', severity: 'critical" onmouseover="alert(1)', target: 'example.com' }],
+    })
+    const html = renderPreview(tpl, data)
+
+    expect(html).not.toContain('critical" on')
+    expect(html).toContain('critical&quot;')
+  })
 })
 
 describe('exportAsFile', () => {
