@@ -3,14 +3,14 @@ import { NavLink, useLocation } from 'react-router-dom'
 import Sidebar from './Sidebar'
 import Background from './Background'
 import { useShortcuts } from '../hooks/useShortcuts'
-import { useSidebar } from '../context/SidebarContext'
+import { SidebarProvider, useSidebar } from '../context/SidebarContext'
 import { routes } from '../routes'
 
 interface AppShellProps {
     children: React.ReactNode
 }
 
-export default function AppShell({ children }: AppShellProps) {
+function AppShellInner({ children }: AppShellProps) {
     const { pathname } = useLocation()
     const { isExpanded: sidebarExpanded, toggleSidebar } = useSidebar()
     useShortcuts(toggleSidebar)
@@ -86,7 +86,6 @@ export default function AppShell({ children }: AppShellProps) {
         { to: routes.settings, label: 'Settings' },
     ]
 
-
     return (
         <>
             <Background state="idle" />
@@ -147,7 +146,7 @@ export default function AppShell({ children }: AppShellProps) {
                     </>
                 )}
 
-                <main 
+                <main
                     className="flex-1 overflow-auto transition-all duration-300 ease-in-out ml-0 lg:ml-[var(--sidebar-width)] pt-14 lg:pt-0 pb-20 lg:pb-0"
                     style={{ '--sidebar-width': `${desktopSidebarWidth}px` } as React.CSSProperties}
                 >
@@ -172,5 +171,13 @@ export default function AppShell({ children }: AppShellProps) {
                 </nav>
             </div>
         </>
+    )
+}
+
+export default function AppShell({ children }: AppShellProps) {
+    return (
+        <SidebarProvider>
+            <AppShellInner>{children}</AppShellInner>
+        </SidebarProvider>
     )
 }
