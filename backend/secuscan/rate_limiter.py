@@ -61,6 +61,12 @@ class ScanRateLimiter:
         self._redis_failed = False
         self._fallback_history: Dict[str, List[float]] = defaultdict(list)
 
+    async def reset(self) -> None:
+        """Clear in-memory fallback state and reset circuit breaker."""
+
+        self._fallback_history.clear()
+        self._redis_failed = False
+
     def _get_client_ip(self, request: Request) -> str:
         """
         Extract the real client IP.
