@@ -624,8 +624,9 @@ class PluginManager:
                 msg = validation.get("message", f"Value does not match pattern {pattern!r}")
                 raise ValueError(f"Field '{field_id}': {msg}")
 
-        # Reject argv-level flag injection
+        # Reject argv-level flag injection and filesystem path traversal
         self._reject_injected_args(field_id, value_str)
+        self._reject_path_traversal(value_str)
 
     def _validate_inputs_against_schema(
         self, plugin: PluginMetadata, inputs: Dict[str, Any]
