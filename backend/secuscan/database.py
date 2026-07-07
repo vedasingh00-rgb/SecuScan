@@ -380,7 +380,7 @@ ON credential_vault(owner_id);
             CREATE INDEX IF NOT EXISTS idx_findings_owner ON findings(owner_id);
             CREATE INDEX IF NOT EXISTS idx_findings_cpe ON findings(cpe);
             CREATE INDEX IF NOT EXISTS idx_findings_validated ON findings(validated);
-            CREATE INDEX IF NOT EXISTS idx_findings_group_id ON findings(owner_id, finding_group_id);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_findings_group_id ON findings(owner_id, finding_group_id);
             CREATE INDEX IF NOT EXISTS idx_findings_asset_id ON findings(owner_id, asset_id);
 
             -- Reports indexes (new)
